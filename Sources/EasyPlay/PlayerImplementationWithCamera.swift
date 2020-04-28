@@ -97,7 +97,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
         let output = AVCaptureVideoDataOutput()
         output.alwaysDiscardsLateVideoFrames = true
         output.videoSettings = videoSettings
-        output.setSampleBufferDelegate(sampleBufferDelegate, queue: .global(qos: .userInteractive))
+        output.setSampleBufferDelegate(sampleBufferDelegate, queue: .serialQueue())
         
         let session = AVCaptureSession()
         do {

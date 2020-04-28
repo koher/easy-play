@@ -84,7 +84,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
         output.alwaysCopiesSampleData = false
         reader.add(output)
         
-        timer = DispatchSource.makeTimerSource(flags: .strict, queue: .global())
+        timer = DispatchSource.makeTimerSource(flags: .strict, queue: .serialQueue())
         timer.schedule(
             deadline: .now(),
             repeating: 1.0 / TimeInterval(videoTrack.nominalFrameRate)
