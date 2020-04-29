@@ -83,7 +83,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
     private let sampleBufferDelegate: SampleBufferDelegate
     private var handler: ((CVPixelBuffer) -> Void)?
     
-    private let lock: NSRecursiveLock = .init()
+    private let serialQueue: DispatchQueue = .serialQueue()
     
     init(device: AVCaptureDevice, sessionPreset: AVCaptureSession.Preset, videoSettings: [String: Any]) throws {
         guard device.supportsSessionPreset(sessionPreset) else {
@@ -97,7 +97,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
         let output = AVCaptureVideoDataOutput()
         output.alwaysDiscardsLateVideoFrames = true
         output.videoSettings = videoSettings
-        output.setSampleBufferDelegate(sampleBufferDelegate, queue: .make())
+        output.setSampleBufferDelegate(sampleBufferDelegate, queue: serialQueue)
         
         let session = AVCaptureSession()
         do {
@@ -114,7 +114,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
     }
     
     var isPlaying: Bool {
-        synchronized { _isPlaying }
+        serialQueue.sync { _isPlaying }
     }
     
     private var _isPlaying: Bool {
@@ -125,7 +125,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
         _ handler: @escaping (CVPixelBuffer) -> Void,
         completion: ((Error?) -> Void)?
     ) -> Bool {
-        synchronized {
+        serialQueue.sync {
             if _isPlaying { return false }
             
             self.handler = handler
@@ -136,7 +136,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
     }
     
     func pause() -> Bool {
-        synchronized {
+        serialQueue.sync {
             guard _isPlaying else { return false }
             
             session.stopRunning()
@@ -146,27 +146,19 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
         }
     }
     
-    fileprivate func synchronized<T>(_ operation: () -> T) -> T {
-        lock.lock()
-        defer { lock.unlock() }
-        return operation()
-    }
-    
     private class SampleBufferDelegate: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         weak var owner: PlayerImplementationWithCamera!
         
         func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-            owner.synchronized {
-                let imageBufferOrNil: CVImageBuffer?
-                if #available(OSX 10.15, iOS 13.0, *) {
-                    imageBufferOrNil = sampleBuffer.imageBuffer
-                } else {
-                    imageBufferOrNil = CMSampleBufferGetImageBuffer(sampleBuffer)
-                }
-                if let imageBuffer = imageBufferOrNil {
-                    assert(owner.handler != nil)
-                    owner.handler?(imageBuffer)
-                }
+            let imageBufferOrNil: CVImageBuffer?
+            if #available(OSX 10.15, iOS 13.0, *) {
+                imageBufferOrNil = sampleBuffer.imageBuffer
+            } else {
+                imageBufferOrNil = CMSampleBufferGetImageBuffer(sampleBuffer)
+            }
+            if let imageBuffer = imageBufferOrNil {
+                assert(owner.handler != nil)
+                owner.handler?(imageBuffer)
             }
         }
         

@@ -61,7 +61,8 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
     private var handler: ((CVPixelBuffer) -> Void)?
     private var completion: ((Error?) -> Void)?
     
-    private let lock: NSRecursiveLock = .init()
+    private let serialQueue: DispatchQueue = .serialQueue()
+    private var isLocking: Bool = false
     
     init(asset: AVAsset, outputSettings: [String: Any]?) throws {
         let videoTracks = asset.tracks(withMediaType: .video)
@@ -84,7 +85,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
         output.alwaysCopiesSampleData = false
         reader.add(output)
         
-        timer = DispatchSource.makeTimerSource(flags: .strict, queue: .make(isConcurrent: true))
+        timer = DispatchSource.makeTimerSource(flags: .strict, queue: .serialQueue())
         timer.schedule(
             deadline: .now(),
             repeating: 1.0 / TimeInterval(videoTrack.nominalFrameRate)
@@ -100,7 +101,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
     }
 
     var isPlaying: Bool {
-        synchronized { _isPlaying }
+        serialQueue.sync { _isPlaying }
     }
     
     private var _isPlaying: Bool {
@@ -111,50 +112,56 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
         _ handler: @escaping (CVPixelBuffer) -> Void,
         completion: ((Error?) -> Void)?
     ) -> Bool {
-        synchronized {
+        serialQueue.sync {
             if _isPlaying { return false }
             
             self.handler = handler
             timer.setEventHandler { [weak self] in
                 guard let self = self else { return }
                 
-                if self.lock.try() {
-                    defer { self.lock.unlock() }
-                    guard let sampleBuffer = self.output.copyNextSampleBuffer() else {
-                        switch self.reader.status {
-                        case .completed:
-                            completion?(nil)
-                            assert(self.pause())
-                        case .failed:
-                            if let completion = self.completion {
-                                if let error = self.reader.error {
-                                    completion(Player.VideoPlayerError.readingFailed(error))
-                                } else {
-                                    completion(Player.VideoPlayerError.unknown)
-                                }
+                guard let sampleBuffer = self.output.copyNextSampleBuffer() else {
+                    switch self.reader.status {
+                    case .completed:
+                        completion?(nil)
+                        assert(self.pause())
+                    case .failed:
+                        if let completion = self.completion {
+                            if let error = self.reader.error {
+                                completion(Player.VideoPlayerError.readingFailed(error))
+                            } else {
+                                completion(Player.VideoPlayerError.unknown)
                             }
-                            assert(self.pause())
-                        case .cancelled:
-                            break
-                        case .reading:
-                            break
-                        case .unknown:
-                            break
-                        @unknown default:
-                            break
                         }
-                        return
+                        assert(self.pause())
+                    case .cancelled:
+                        break
+                    case .reading:
+                        break
+                    case .unknown:
+                        break
+                    @unknown default:
+                        break
                     }
-                    let imageBufferOrNil: CVImageBuffer?
-                    if #available(OSX 10.15, iOS 13.0, *) {
-                        imageBufferOrNil = sampleBuffer.imageBuffer
-                    } else {
-                        imageBufferOrNil = CMSampleBufferGetImageBuffer(sampleBuffer)
-                    }
-                    if let imageBuffer = imageBufferOrNil {
-                        assert(self.handler != nil)
-                        self.handler?(imageBuffer)
-                    }
+                    return
+                }
+                let imageBufferOrNil: CVImageBuffer?
+                if #available(OSX 10.15, iOS 13.0, *) {
+                    imageBufferOrNil = sampleBuffer.imageBuffer
+                } else {
+                    imageBufferOrNil = CMSampleBufferGetImageBuffer(sampleBuffer)
+                }
+                guard let imageBuffer = imageBufferOrNil else {
+                    return
+                }
+                
+                if self.isLocking { return }
+                self.serialQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    guard self._isPlaying else { return }
+                    self.isLocking = true
+                    defer { self.isLocking = false }
+                    assert(self.handler != nil)
+                    self.handler?(imageBuffer)
                 }
             }
             timer.resume()
@@ -164,7 +171,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
     }
     
     func pause() -> Bool {
-        synchronized {
+        serialQueue.sync {
             guard _isPlaying else { return false }
 
             timer.suspend()
@@ -173,11 +180,5 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
             
             return true
         }
-    }
-
-    fileprivate func synchronized<T>(_ operation: () -> T) -> T {
-        lock.lock()
-        defer { lock.unlock() }
-        return operation()
     }
 }
