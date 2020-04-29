@@ -1,7 +1,7 @@
 import Dispatch
 
 internal extension DispatchQueue {
-    static func serialQueue() -> DispatchQueue {
-        .init(label: "org.koherent.EasyPlay", qos: .userInteractive, attributes: [], autoreleaseFrequency: .inherit, target: nil)
+    static func make(isConcurrent: Bool = false) -> DispatchQueue {
+        .init(label: "org.koherent.EasyPlay", qos: .userInteractive, attributes: isConcurrent ? .concurrent : [], autoreleaseFrequency: .inherit, target: nil)
     }
 }

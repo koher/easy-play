@@ -84,7 +84,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
         output.alwaysCopiesSampleData = false
         reader.add(output)
         
-        timer = DispatchSource.makeTimerSource(flags: .strict, queue: .serialQueue())
+        timer = DispatchSource.makeTimerSource(flags: .strict, queue: .make(isConcurrent: true))
         timer.schedule(
             deadline: .now(),
             repeating: 1.0 / TimeInterval(videoTrack.nominalFrameRate)
@@ -117,40 +117,44 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
             self.handler = handler
             timer.setEventHandler { [weak self] in
                 guard let self = self else { return }
-                guard let sampleBuffer = self.output.copyNextSampleBuffer() else {
-                    switch self.reader.status {
-                    case .completed:
-                        completion?(nil)
-                        assert(self.pause())
-                    case .failed:
-                        if let completion = self.completion {
-                            if let error = self.reader.error {
-                                completion(Player.VideoPlayerError.readingFailed(error))
-                            } else {
-                                completion(Player.VideoPlayerError.unknown)
+                
+                if self.lock.try() {
+                    defer { self.lock.unlock() }
+                    guard let sampleBuffer = self.output.copyNextSampleBuffer() else {
+                        switch self.reader.status {
+                        case .completed:
+                            completion?(nil)
+                            assert(self.pause())
+                        case .failed:
+                            if let completion = self.completion {
+                                if let error = self.reader.error {
+                                    completion(Player.VideoPlayerError.readingFailed(error))
+                                } else {
+                                    completion(Player.VideoPlayerError.unknown)
+                                }
                             }
+                            assert(self.pause())
+                        case .cancelled:
+                            break
+                        case .reading:
+                            break
+                        case .unknown:
+                            break
+                        @unknown default:
+                            break
                         }
-                        assert(self.pause())
-                    case .cancelled:
-                        break
-                    case .reading:
-                        break
-                    case .unknown:
-                        break
-                    @unknown default:
-                        break
+                        return
                     }
-                    return
-                }
-                let imageBufferOrNil: CVImageBuffer?
-                if #available(OSX 10.15, iOS 13.0, *) {
-                    imageBufferOrNil = sampleBuffer.imageBuffer
-                } else {
-                    imageBufferOrNil = CMSampleBufferGetImageBuffer(sampleBuffer)
-                }
-                if let imageBuffer = imageBufferOrNil {
-                    assert(self.handler != nil)
-                    self.handler?(imageBuffer)
+                    let imageBufferOrNil: CVImageBuffer?
+                    if #available(OSX 10.15, iOS 13.0, *) {
+                        imageBufferOrNil = sampleBuffer.imageBuffer
+                    } else {
+                        imageBufferOrNil = CMSampleBufferGetImageBuffer(sampleBuffer)
+                    }
+                    if let imageBuffer = imageBufferOrNil {
+                        assert(self.handler != nil)
+                        self.handler?(imageBuffer)
+                    }
                 }
             }
             timer.resume()
