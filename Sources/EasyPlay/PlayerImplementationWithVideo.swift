@@ -89,7 +89,6 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
     
     deinit {
         _ = pause()
-        timer?.invalidate()
         reader.cancelReading()
     }
 
@@ -120,7 +119,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
                         switch self.reader.status {
                         case .completed:
                             completion?(nil)
-                            assert(self.pause())
+                            assert(self._pause())
                         case .failed:
                             if let completion = self.completion {
                                 if let error = self.reader.error {
@@ -129,7 +128,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
                                     completion(Player.VideoPlayerError.unknown)
                                 }
                             }
-                            assert(self.pause())
+                            assert(self._pause())
                         case .cancelled:
                             break
                         case .reading:
@@ -167,16 +166,20 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
         }
     }
     
+    private func _pause() -> Bool {
+        guard _isPlaying else { return false }
+
+        timer?.invalidate()
+        timer = nil
+        handler = nil
+        completion = nil
+        
+        return true
+    }
+    
     func pause() -> Bool {
         serialQueue.sync {
-            guard _isPlaying else { return false }
-
-            timer?.invalidate()
-            timer = nil
-            handler = nil
-            completion = nil
-            
-            return true
+            _pause()
         }
     }
 }
