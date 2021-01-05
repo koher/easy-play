@@ -58,8 +58,10 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
 
     private var timer: Timer?
     
-    private var handler: ((CVPixelBuffer) -> Void)?
+    private var handler: ((Player.Frame) -> Void)?
     private var completion: ((Error?) -> Void)?
+    
+    private var frameIndex: Int = 0
     
     private let serialQueue: DispatchQueue = .serialQueue()
     private var isLocking: Bool = false
@@ -101,7 +103,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
     }
 
     func play(
-        _ handler: @escaping (CVPixelBuffer) -> Void,
+        _ handler: @escaping (Player.Frame) -> Void,
         completion: ((Error?) -> Void)?
     ) -> Bool {
         serialQueue.sync {
@@ -140,15 +142,31 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
                         }
                         return
                     }
+                    defer { self.frameIndex += 1 }
                     let imageBufferOrNil: CVImageBuffer?
+                    let timingInfoOrNil: CMSampleTimingInfo?
                     if #available(OSX 10.15, iOS 13.0, *) {
                         imageBufferOrNil = sampleBuffer.imageBuffer
+                        timingInfoOrNil = try? sampleBuffer.sampleTimingInfo(at: 0)
                     } else {
                         imageBufferOrNil = CMSampleBufferGetImageBuffer(sampleBuffer)
+                        var timingInfo: CMSampleTimingInfo = .init()
+                        if CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &timingInfo) == 0 {
+                            timingInfoOrNil = timingInfo
+                        } else {
+                            timingInfoOrNil = nil
+                        }
                     }
-                    guard let imageBuffer = imageBufferOrNil else {
+                    guard let imageBuffer = imageBufferOrNil,
+                          let timingInfo = timingInfoOrNil else {
                         return
                     }
+                    
+                    let frame: Player.Frame = .init(
+                        index: self.frameIndex,
+                        time: CMTimeGetSeconds(timingInfo.presentationTimeStamp),
+                        pixelBuffer: imageBuffer
+                    )
                     
                     if self.isLocking { return }
                     self.serialQueue.async { [weak self] in
@@ -157,7 +175,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
                         self.isLocking = true
                         defer { self.isLocking = false }
                         assert(self.handler != nil)
-                        self.handler?(imageBuffer)
+                        self.handler?(frame)
                     }
                 }
             }

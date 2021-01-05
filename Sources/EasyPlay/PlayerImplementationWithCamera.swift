@@ -81,7 +81,11 @@ extension Player {
 internal final class PlayerImplementationWithCamera: PlayerImplementation {
     private let session: AVCaptureSession
     private let sampleBufferDelegate: SampleBufferDelegate
-    private var handler: ((CVPixelBuffer) -> Void)?
+    private var handler: ((Player.Frame) -> Void)?
+    
+    private var initialTime: TimeInterval?
+    private var lastTime: TimeInterval?
+    private var frameIndex: Int = 0
     
     private let serialQueue: DispatchQueue = .serialQueue()
     
@@ -122,7 +126,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
     }
     
     func play(
-        _ handler: @escaping (CVPixelBuffer) -> Void,
+        _ handler: @escaping (Player.Frame) -> Void,
         completion: ((Error?) -> Void)?
     ) -> Bool {
         serialQueue.sync {
@@ -147,18 +151,46 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
     }
     
     private class SampleBufferDelegate: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-        weak var owner: PlayerImplementationWithCamera!
+        weak var owner: PlayerImplementationWithCamera?
         
         func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+            guard let owner = self.owner else { return }
+            defer { owner.frameIndex += 1 }
             let imageBufferOrNil: CVImageBuffer?
+            let timingInfoOrNil: CMSampleTimingInfo?
             if #available(OSX 10.15, iOS 13.0, *) {
                 imageBufferOrNil = sampleBuffer.imageBuffer
+                timingInfoOrNil = try? sampleBuffer.sampleTimingInfo(at: 0)
             } else {
                 imageBufferOrNil = CMSampleBufferGetImageBuffer(sampleBuffer)
+                var timingInfo: CMSampleTimingInfo = .init()
+                if CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &timingInfo) == 0 {
+                    timingInfoOrNil = timingInfo
+                } else {
+                    timingInfoOrNil = nil
+                }
             }
-            if let imageBuffer = imageBufferOrNil {
+            if let imageBuffer = imageBufferOrNil,
+               let timingInfo = timingInfoOrNil {
                 assert(owner.handler != nil)
-                owner.handler?(imageBuffer)
+                
+                let time: TimeInterval
+                let currentTime: TimeInterval = CMTimeGetSeconds(timingInfo.presentationTimeStamp)
+                if let initialTime = owner.initialTime {
+                    time = currentTime - initialTime
+                } else {
+                    time = 0
+                    owner.initialTime = currentTime
+                }
+                owner.lastTime = time
+
+                owner.handler?(
+                    Player.Frame(
+                        index: owner.frameIndex,
+                        time: time,
+                        pixelBuffer: imageBuffer
+                    )
+                )
             }
         }
         

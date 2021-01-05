@@ -12,20 +12,20 @@ public final class Player {
     }
 
     @discardableResult
-    public func play(_ handler: @escaping (CVPixelBuffer) -> Void) -> Bool {
+    public func play(_ handler: @escaping (Frame) -> Void) -> Bool {
         _play(handler, completion: nil)
     }
 
     @discardableResult
     public func play(
-        _ handler: @escaping (CVPixelBuffer) -> Void,
+        _ handler: @escaping (Frame) -> Void,
         completion: @escaping (Error?) -> Void
     ) -> Bool {
         _play(handler, completion: completion)
     }
     
     private func _play(
-        _ handler: @escaping (CVPixelBuffer) -> Void,
+        _ handler: @escaping (Frame) -> Void,
         completion: ((Error?) -> Void)?
     ) -> Bool {
         player.play(handler, completion: completion)
@@ -34,6 +34,12 @@ public final class Player {
     @discardableResult
     public func pause() -> Bool {
         player.pause()
+    }
+    
+    public struct Frame {
+        public let index: Int
+        public let time: TimeInterval
+        public let pixelBuffer: CVPixelBuffer
     }
 }
 
@@ -50,7 +56,7 @@ extension Player {
 internal protocol PlayerImplementation: AnyObject {
     var isPlaying: Bool { get }
     func play(
-        _ handler: @escaping (CVPixelBuffer) -> Void,
+        _ handler: @escaping (Player.Frame) -> Void,
         completion: ((Error?) -> Void)?
     ) -> Bool
     func pause() -> Bool
