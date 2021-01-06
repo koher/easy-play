@@ -1,7 +1,7 @@
 import Foundation
 import AVFoundation
 
-public struct Camera: VideoSourceProtocol {
+public struct Camera: VideoSource {
     private enum DeviceSettings {
         case device(AVCaptureDevice)
         case position(AVCaptureDevice.Position, focusMode: AVCaptureDevice.FocusMode?)
@@ -32,7 +32,7 @@ public struct Camera: VideoSourceProtocol {
         self.videoSettings = videoSettings
     }
     
-    public func player() throws -> some PlayerProtocol {
+    public func player() throws -> some Player {
         let device: AVCaptureDevice
         switch deviceSettings {
         case .device(let designatedDevice):
@@ -95,7 +95,7 @@ extension Camera {
     }
 }
 
-private final class _PlayerForCamera: PlayerProtocol {
+private final class _PlayerForCamera: Player {
     private let session: AVCaptureSession
     private let sampleBufferDelegate: SampleBufferDelegate
     private var handler: ((Frame) -> Void)?

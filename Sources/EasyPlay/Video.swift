@@ -1,7 +1,7 @@
 import Foundation
 import AVFoundation
 
-public struct Video: VideoSourceProtocol {
+public struct Video: VideoSource {
     public var asset: AVAsset
     public var outputSettings: [String: Any]?
     
@@ -35,7 +35,7 @@ public struct Video: VideoSourceProtocol {
         self.init(asset: asset, outputSettings: outputSettings)
     }
     
-    public func player() throws -> some PlayerProtocol {
+    public func player() throws -> some Player {
         try _PlayerForVideo(asset: asset, outputSettings: outputSettings)
     }
 }
@@ -53,7 +53,7 @@ extension Video {
     }
 }
 
-private final class _PlayerForVideo: PlayerProtocol {
+private final class _PlayerForVideo: Player {
     private let videoTrack: AVAssetTrack
     private let reader: AVAssetReader
     private let output: AVAssetReaderTrackOutput

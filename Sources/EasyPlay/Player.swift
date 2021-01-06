@@ -1,4 +1,4 @@
-public protocol PlayerProtocol: AnyObject {
+public protocol Player: AnyObject {
     var isPlaying: Bool { get }
     @discardableResult func play(
         _ handler: @escaping (Frame) -> Void,
@@ -7,7 +7,7 @@ public protocol PlayerProtocol: AnyObject {
     @discardableResult func pause() -> Bool
 }
 
-extension PlayerProtocol {
+extension Player {
     @discardableResult
     public func play(_ handler: @escaping (Frame) -> Void) -> Bool {
         play(handler, completion: nil)
