@@ -1,28 +1,43 @@
 import Foundation
 import AVFoundation
 
-extension Player.VideoSource {
-    public static func camera(
+public struct Camera: VideoSourceProtocol {
+    private enum DeviceSettings {
+        case device(AVCaptureDevice)
+        case position(AVCaptureDevice.Position, focusMode: AVCaptureDevice.FocusMode?)
+    }
+    
+    private let deviceSettings: DeviceSettings
+    public var sessionPreset: AVCaptureSession.Preset
+    public var videoSettings: [String: Any]
+    
+    public init(
         device: AVCaptureDevice,
         sessionPreset: AVCaptureSession.Preset = .vga640x480,
         videoSettings: [String: Any] = [:]
-    ) -> Self {
-        Self {
-            try PlayerImplementationWithCamera(
-                device: device,
-                sessionPreset: sessionPreset,
-                videoSettings: videoSettings
-            )
-        }
+    ) {
+        self.deviceSettings = .device(device)
+        self.sessionPreset = sessionPreset
+        self.videoSettings = videoSettings
     }
     
-    public static func camera(
+    public init(
         position: AVCaptureDevice.Position = .back,
         focusMode: AVCaptureDevice.FocusMode? = nil,
         sessionPreset: AVCaptureSession.Preset = .vga640x480,
         videoSettings: [String: Any] = [:]
-    ) -> Self {
-        Self {
+    ) {
+        self.deviceSettings = .position(position, focusMode: focusMode)
+        self.sessionPreset = sessionPreset
+        self.videoSettings = videoSettings
+    }
+    
+    public func player() throws -> _PlayerForCamera {
+        let device: AVCaptureDevice
+        switch deviceSettings {
+        case .device(let designatedDevice):
+            device = designatedDevice
+        case .position(let position, focusMode: let focusMode):
             var deviceOrNil: AVCaptureDevice? = nil
             if #available(OSX 10.15, iOS 10.0, *) {
                 deviceOrNil = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
@@ -34,43 +49,45 @@ extension Player.VideoSource {
                     }
                 }
             }
-            guard let device = deviceOrNil else {
-                throw Player.CameraInitializationError.unsupportedPosition(position)
+            guard let deviceToSetUp = deviceOrNil else {
+                throw InitializationError.unsupportedPosition(position)
             }
 
             do {
-                try device.lockForConfiguration()
-                defer { device.unlockForConfiguration() }
+                try deviceToSetUp.lockForConfiguration()
+                defer { deviceToSetUp.unlockForConfiguration() }
                 
                 if let focusMode = focusMode {
-                    guard device.isFocusModeSupported(focusMode) else {
-                        throw Player.CameraInitializationError.unsupportedFocusMode(focusMode)
+                    guard deviceToSetUp.isFocusModeSupported(focusMode) else {
+                        throw InitializationError.unsupportedFocusMode(focusMode)
                     }
-                    device.focusMode = focusMode
+                    deviceToSetUp.focusMode = focusMode
                 } else {
-                    if device.isFocusModeSupported(.continuousAutoFocus) {
-                        device.focusMode = .continuousAutoFocus
-                    } else if device.isFocusModeSupported(.autoFocus) {
-                        device.focusMode = .autoFocus
+                    if deviceToSetUp.isFocusModeSupported(.continuousAutoFocus) {
+                        deviceToSetUp.focusMode = .continuousAutoFocus
+                    } else if deviceToSetUp.isFocusModeSupported(.autoFocus) {
+                        deviceToSetUp.focusMode = .autoFocus
                     }
                 }
-            } catch let error as Player.CameraInitializationError {
+            } catch let error as InitializationError {
                 throw error
             } catch let error {
-                throw Player.CameraInitializationError.configurationFailure(error)
+                throw InitializationError.configurationFailure(error)
             }
             
-            return try PlayerImplementationWithCamera(
-                device: device,
-                sessionPreset: sessionPreset,
-                videoSettings: videoSettings
-            )
+            device = deviceToSetUp
         }
+        
+        return try _PlayerForCamera(
+            device: device,
+            sessionPreset: sessionPreset,
+            videoSettings: videoSettings
+        )
     }
 }
 
-extension Player {
-    public enum CameraInitializationError: Error {
+extension Camera {
+    public enum InitializationError: Error {
         case unsupportedPosition(AVCaptureDevice.Position)
         case unsupportedFocusMode(AVCaptureDevice.FocusMode)
         case unsupportedSessionPreset(AVCaptureSession.Preset)
@@ -78,10 +95,10 @@ extension Player {
     }
 }
 
-internal final class PlayerImplementationWithCamera: PlayerImplementation {
+public final class _PlayerForCamera: PlayerProtocol {
     private let session: AVCaptureSession
     private let sampleBufferDelegate: SampleBufferDelegate
-    private var handler: ((Player.Frame) -> Void)?
+    private var handler: ((Frame) -> Void)?
     
     private var initialTime: TimeInterval?
     private var lastTime: TimeInterval?
@@ -91,7 +108,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
     
     init(device: AVCaptureDevice, sessionPreset: AVCaptureSession.Preset, videoSettings: [String: Any]) throws {
         guard device.supportsSessionPreset(sessionPreset) else {
-            throw Player.CameraInitializationError.unsupportedSessionPreset(sessionPreset)
+            throw Camera.InitializationError.unsupportedSessionPreset(sessionPreset)
         }
         
         let input = try! AVCaptureDeviceInput(device: device)
@@ -117,7 +134,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
         sampleBufferDelegate.owner = self
     }
     
-    var isPlaying: Bool {
+    public var isPlaying: Bool {
         serialQueue.sync { _isPlaying }
     }
     
@@ -125,8 +142,8 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
         handler != nil
     }
     
-    func play(
-        _ handler: @escaping (Player.Frame) -> Void,
+    @discardableResult public func play(
+        _ handler: @escaping (Frame) -> Void,
         completion: ((Error?) -> Void)?
     ) -> Bool {
         serialQueue.sync {
@@ -139,7 +156,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
         }
     }
     
-    func pause() -> Bool {
+    @discardableResult public func pause() -> Bool {
         serialQueue.sync {
             guard _isPlaying else { return false }
             
@@ -151,7 +168,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
     }
     
     private class SampleBufferDelegate: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-        weak var owner: PlayerImplementationWithCamera?
+        weak var owner: _PlayerForCamera?
         
         func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
             guard let owner = self.owner else { return }
@@ -185,7 +202,7 @@ internal final class PlayerImplementationWithCamera: PlayerImplementation {
                 owner.lastTime = time
 
                 owner.handler?(
-                    Player.Frame(
+                    Frame(
                         index: owner.frameIndex,
                         time: time,
                         pixelBuffer: imageBuffer

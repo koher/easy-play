@@ -1,45 +1,47 @@
 import Foundation
 import AVFoundation
 
-extension Player.VideoSource {
-    public static func video(
+public struct Video: VideoSourceProtocol {
+    public var asset: AVAsset
+    public var outputSettings: [String: Any]?
+    
+    public init(
         asset: AVAsset,
         outputSettings: [String: Any]? = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
         ]
-    ) -> Self {
-        .init {
-            try PlayerImplementationWithVideo(asset: asset, outputSettings: outputSettings)
-        }
+    ) {
+        self.asset = asset
+        self.outputSettings = outputSettings
     }
     
-    public static func video(
+    public init(
         url: URL,
         outputSettings: [String: Any]? = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
         ]
-    ) -> Self {
-        .init {
-            let asset: AVAsset = .init(url: url)
-            return try PlayerImplementationWithVideo(asset: asset, outputSettings: outputSettings)
-        }
+    ) {
+        let asset = AVAsset(url: url)
+        self.init(asset: asset, outputSettings: outputSettings)
     }
     
-    public static func video(
+    public init(
         path: String,
         outputSettings: [String: Any]? = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
         ]
-    ) -> Self {
-        .init {
-            let asset: AVAsset = .init(url: URL(fileURLWithPath: path))
-            return try PlayerImplementationWithVideo(asset: asset, outputSettings: outputSettings)
-        }
+    ) {
+        let asset = AVAsset(url: URL(fileURLWithPath: path))
+        self.init(asset: asset, outputSettings: outputSettings)
+    }
+    
+    public func player() throws -> _PlayerForVideo {
+        try _PlayerForVideo(asset: asset, outputSettings: outputSettings)
     }
 }
 
-extension Player {
-    public enum VideoInitializationError: Error {
+extension Video {
+    public enum InitializationError: Error {
         case noVideoTrack
         case multipleVideoTracks(Int)
         case readerInitializationFailure(Error)
@@ -51,14 +53,14 @@ extension Player {
     }
 }
 
-internal final class PlayerImplementationWithVideo: PlayerImplementation {
+public final class _PlayerForVideo: PlayerProtocol {
     private let videoTrack: AVAssetTrack
     private let reader: AVAssetReader
     private let output: AVAssetReaderTrackOutput
 
     private var timer: Timer?
     
-    private var handler: ((Player.Frame) -> Void)?
+    private var handler: ((Frame) -> Void)?
     private var completion: ((Error?) -> Void)?
     
     private var frameIndex: Int = 0
@@ -69,10 +71,10 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
     init(asset: AVAsset, outputSettings: [String: Any]?) throws {
         let videoTracks = asset.tracks(withMediaType: .video)
         guard let videoTrack = videoTracks.first else {
-            throw Player.VideoInitializationError.noVideoTrack
+            throw Video.InitializationError.noVideoTrack
         }
         guard videoTracks.count == 1 else {
-            throw Player.VideoInitializationError
+            throw Video.InitializationError
                 .multipleVideoTracks(videoTracks.count)
         }
         self.videoTrack = videoTrack
@@ -80,7 +82,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
         do {
             reader = try AVAssetReader(asset: asset)
         } catch let error {
-            throw Player.VideoInitializationError
+            throw Video.InitializationError
                 .readerInitializationFailure(error)
         }
         output = .init(track: videoTrack, outputSettings: outputSettings)
@@ -94,7 +96,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
         reader.cancelReading()
     }
 
-    var isPlaying: Bool {
+    public var isPlaying: Bool {
         serialQueue.sync { _isPlaying }
     }
     
@@ -102,8 +104,8 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
         handler != nil
     }
 
-    func play(
-        _ handler: @escaping (Player.Frame) -> Void,
+    @discardableResult public func play(
+        _ handler: @escaping (Frame) -> Void,
         completion: ((Error?) -> Void)?
     ) -> Bool {
         serialQueue.sync {
@@ -116,6 +118,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
             ) { [weak self] _ in
                 self?.serialQueue.async { [weak self] in
                     guard let self = self else { return }
+                    guard let handler = self.handler else { return }
                     
                     guard let sampleBuffer = self.output.copyNextSampleBuffer() else {
                         switch self.reader.status {
@@ -125,9 +128,9 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
                         case .failed:
                             if let completion = self.completion {
                                 if let error = self.reader.error {
-                                    completion(Player.VideoPlayerError.readingFailed(error))
+                                    completion(Video.VideoPlayerError.readingFailed(error))
                                 } else {
-                                    completion(Player.VideoPlayerError.unknown)
+                                    completion(Video.VideoPlayerError.unknown)
                                 }
                             }
                             assert(self._pause())
@@ -162,21 +165,13 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
                         return
                     }
                     
-                    let frame: Player.Frame = .init(
+                    let frame: Frame = .init(
                         index: self.frameIndex,
                         time: CMTimeGetSeconds(timingInfo.presentationTimeStamp),
                         pixelBuffer: imageBuffer
                     )
                     
-                    if self.isLocking { return }
-                    self.serialQueue.async { [weak self] in
-                        guard let self = self else { return }
-                        guard self._isPlaying else { return }
-                        self.isLocking = true
-                        defer { self.isLocking = false }
-                        assert(self.handler != nil)
-                        self.handler?(frame)
-                    }
+                    handler(frame)
                 }
             }
             
@@ -195,7 +190,7 @@ internal final class PlayerImplementationWithVideo: PlayerImplementation {
         return true
     }
     
-    func pause() -> Bool {
+    @discardableResult public func pause() -> Bool {
         serialQueue.sync {
             _pause()
         }

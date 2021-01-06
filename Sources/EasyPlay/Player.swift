@@ -1,63 +1,28 @@
 import AVFoundation
 
-public final class Player {
-    private let player: PlayerImplementation
-    
-    public init(videoSource: VideoSource) throws {
-        player = try videoSource.makePlayer()
-    }
-
-    public var isPlaying: Bool {
-        player.isPlaying
-    }
-
-    @discardableResult
-    public func play(_ handler: @escaping (Frame) -> Void) -> Bool {
-        _play(handler, completion: nil)
-    }
-
-    @discardableResult
-    public func play(
-        _ handler: @escaping (Frame) -> Void,
-        completion: @escaping (Error?) -> Void
-    ) -> Bool {
-        _play(handler, completion: completion)
-    }
-    
-    private func _play(
-        _ handler: @escaping (Frame) -> Void,
-        completion: ((Error?) -> Void)?
-    ) -> Bool {
-        player.play(handler, completion: completion)
-    }
-    
-    @discardableResult
-    public func pause() -> Bool {
-        player.pause()
-    }
-    
-    public struct Frame {
-        public let index: Int
-        public let time: TimeInterval
-        public let pixelBuffer: CVPixelBuffer
-    }
+public struct Frame {
+    public let index: Int
+    public let time: TimeInterval
+    public let pixelBuffer: CVPixelBuffer
 }
 
-extension Player {
-    public struct VideoSource {
-        fileprivate let makePlayer: () throws -> PlayerImplementation
-        
-        internal init(_ makePlayer: @escaping () throws -> PlayerImplementation) {
-            self.makePlayer = makePlayer
-        }
-    }
+public protocol VideoSourceProtocol {
+    associatedtype Player: PlayerProtocol
+    func player() throws -> Player
 }
 
-internal protocol PlayerImplementation: AnyObject {
+public protocol PlayerProtocol: AnyObject {
     var isPlaying: Bool { get }
-    func play(
-        _ handler: @escaping (Player.Frame) -> Void,
+    @discardableResult func play(
+        _ handler: @escaping (Frame) -> Void,
         completion: ((Error?) -> Void)?
     ) -> Bool
-    func pause() -> Bool
+    @discardableResult func pause() -> Bool
+}
+
+extension PlayerProtocol {
+    @discardableResult
+    public func play(_ handler: @escaping (Frame) -> Void) -> Bool {
+        play(handler, completion: nil)
+    }
 }
