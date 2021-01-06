@@ -35,7 +35,7 @@ public struct Video: VideoSourceProtocol {
         self.init(asset: asset, outputSettings: outputSettings)
     }
     
-    public func player() throws -> _PlayerForVideo {
+    public func player() throws -> some PlayerProtocol {
         try _PlayerForVideo(asset: asset, outputSettings: outputSettings)
     }
 }
@@ -53,7 +53,7 @@ extension Video {
     }
 }
 
-public final class _PlayerForVideo: PlayerProtocol {
+private final class _PlayerForVideo: PlayerProtocol {
     private let videoTrack: AVAssetTrack
     private let reader: AVAssetReader
     private let output: AVAssetReaderTrackOutput

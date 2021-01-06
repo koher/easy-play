@@ -6,8 +6,8 @@ import PackageDescription
 let package = Package(
     name: "EasyPlay",
     platforms: [
-        .iOS(SupportedPlatform.IOSVersion.v10),
-        .macOS(SupportedPlatform.MacOSVersion.v10_12),
+        .iOS(SupportedPlatform.IOSVersion.v13),
+        .macOS(SupportedPlatform.MacOSVersion.v10_15),
     ],
     products: [
         // Products define the executables and libraries produced by a package, and make them visible to other packages.

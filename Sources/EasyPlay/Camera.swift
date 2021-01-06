@@ -32,7 +32,7 @@ public struct Camera: VideoSourceProtocol {
         self.videoSettings = videoSettings
     }
     
-    public func player() throws -> _PlayerForCamera {
+    public func player() throws -> some PlayerProtocol {
         let device: AVCaptureDevice
         switch deviceSettings {
         case .device(let designatedDevice):
@@ -95,7 +95,7 @@ extension Camera {
     }
 }
 
-public final class _PlayerForCamera: PlayerProtocol {
+private final class _PlayerForCamera: PlayerProtocol {
     private let session: AVCaptureSession
     private let sampleBufferDelegate: SampleBufferDelegate
     private var handler: ((Frame) -> Void)?
