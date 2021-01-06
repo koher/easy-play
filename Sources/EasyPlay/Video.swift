@@ -47,7 +47,7 @@ extension Video {
         case readerInitializationFailure(Error)
     }
     
-    public enum VideoPlayerError: Error {
+    public enum PlayerError: Error {
         case readingFailed(Error)
         case unknown
     }
@@ -128,9 +128,9 @@ private final class _PlayerForVideo: PlayerProtocol {
                         case .failed:
                             if let completion = self.completion {
                                 if let error = self.reader.error {
-                                    completion(Video.VideoPlayerError.readingFailed(error))
+                                    completion(Video.PlayerError.readingFailed(error))
                                 } else {
-                                    completion(Video.VideoPlayerError.unknown)
+                                    completion(Video.PlayerError.unknown)
                                 }
                             }
                             assert(self._pause())
